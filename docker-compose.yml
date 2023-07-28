@@ -1,0 +1,108 @@
+version: "3.8"
+
+services:
+  nginx:
+    container_name: nginx
+    image: nginx:latest
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - opencodelab
+    depends_on:
+      - app-server
+
+  app-server:
+    build: .
+    env_file:
+      - .env
+    networks:
+      - opencodelab
+    depends_on:
+      redis-server:
+        condition: service_healthy
+      rabbitmq-server:
+        condition: service_healthy
+      database:
+        condition: service_healthy
+  redis-server:
+    container_name: redis
+    image: redis:7.0-alpine3.18
+    volumes:
+      - redis-data:/data
+    networks:
+      - opencodelab
+    healthcheck:
+      test: redis-cli ping
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  polling-server:
+    build:
+      context: ./polling-server
+    env_file:
+      - .env
+    networks:
+      - opencodelab
+    depends_on:
+      redis-server:
+        condition: service_healthy
+
+  rabbitmq-server:
+    container_name: mq
+    image: rabbitmq:3.12-alpine
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - opencodelab
+    healthcheck:
+      test: rabbitmq-diagnostics check_running
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  database:
+    container_name: db
+    image: mongo:latest
+    volumes:
+      - mongo-data:/data/db
+      - mongo-data:/data/configdb
+    networks:
+      - opencodelab
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  python-sandbox:
+    build:
+      dockerfile: Dockerfile._python
+    env_file:
+      - .env
+    networks:
+      - opencodelab
+    depends_on:
+      rabbitmq-server:
+        condition: service_healthy
+
+  node-sandbox:
+    build:
+      dockerfile: Dockerfile._node
+    env_file:
+      - .env
+    networks:
+      - opencodelab
+    depends_on:
+      rabbitmq-server:
+        condition: service_healthy
+
+volumes:
+  rabbitmq-data:
+  mongo-data:
+  redis-data:
+
+networks:
+  opencodelab:
+    name: opencodelab
